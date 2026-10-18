@@ -44,6 +44,7 @@ def words_from_image(image, scale: float) -> list[dict]:
     px = _tesseract_words(clean, "--psm 6")
     px = _refine_payment_grids(clean, px)
     px = _refine_account_headers(clean, px)
+    px = _refine_large_numbers(_gray(image), px)
     return [{"text": w["text"], "x0": w["x0"] * scale, "x1": w["x1"] * scale,
              "top": w["top"] * scale, "bottom": w["bottom"] * scale} for w in px]
 
@@ -115,10 +116,13 @@ def _refine_payment_grids(img, words: list[dict]) -> list[dict]:
         row_h = hdr["bottom"] - hdr["top"]
         cursor = hdr["bottom"]
         left = max(0, int(hdr["x0"]) - 10)
+        prev_year = None
         while True:
             # the next row's year token sits in the column left of DEC
+            # any token in the year column counts: bold years are often misread ('2012' -> 'jr')
             cands = [w for w in words if hdr["x0"] - 20 <= w["x0"] <= hdr["x1"]
-                     and cursor < w["top"] < cursor + 3.2 * row_h and re.fullmatch(r"[0-9oO]{3,4}", w["text"])]
+                     and cursor < w["top"] < cursor + 3.2 * row_h and len(w["text"]) <= 5
+                     and w["text"].upper() not in ("VALUE", "TYPE", "OF")]
             if not cands:
                 break
             year = min(cands, key=lambda w: w["top"])
@@ -128,9 +132,25 @@ def _refine_payment_grids(img, words: list[dict]) -> list[dict]:
                    if year["top"] - 3 <= mid(w) <= year["bottom"] + 3 and w["x0"] >= left]
             crop = _strip_vertical_rules(img[max(0, y0):y1, left:])
             fresh = _tesseract_words(crop, f"--psm 7 -c tessedit_char_whitelist={GRID_CHARS}", dx=left, dy=max(0, y0))
-            if fresh and re.fullmatch(r"(19|20)\d\d", fresh[0]["text"]):
-                replace_ids.update(row)
-                added.extend(fresh)
+            # bold years often lose a digit ('2019' -> '219'); rows run newest first, so a
+            # damaged year is the previous row's year minus one
+            def fix_year(text: str) -> str | None:
+                if re.fullmatch(r"(19|20)\d\d", text):
+                    return text
+                if prev_year and re.fullmatch(r"[0-9oO]{3,4}", text):
+                    return str(prev_year - 1)
+                return None
+
+            codes = [f for f in fresh if f["x0"] > hdr["x1"]]
+            if not codes:
+                break  # not a grid row (the grid has ended)
+            fixed = fix_year(fresh[0]["text"]) if fresh[0]["x0"] <= hdr["x1"] else None
+            # unreadable year: emit '????' in the year column; the parser infers it from the
+            # payment end date and row order
+            yword = {**year, "text": fixed or "????"}
+            replace_ids.update(row)
+            added.extend([yword] + codes)
+            prev_year = int(fixed) if fixed else (prev_year - 1 if prev_year else None)
             cursor = year["bottom"]
     return [w for i, w in enumerate(words) if i not in replace_ids] + added
 
@@ -160,4 +180,46 @@ def _refine_account_headers(img, words: list[dict]) -> list[dict]:
         fresh = _tesseract_words(img[y0:y1, :], "--psm 11", dy=y0)
         if len(fresh) >= 3:
             out = [w for w in out if not (y0 <= (w["top"] + w["bottom"]) / 2 <= y1)] + fresh
+    return out
+
+
+def _gray(image) -> np.ndarray:
+    import cv2
+
+    return cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2GRAY)
+
+
+def _refine_large_numbers(gray, words: list[dict]) -> list[dict]:
+    """Re-read numbers set in large type (the score badge) with a digits-only alphabet.
+
+    Large display digits, often light-on-dark inside a badge, are read as '7/0)' or '6 82'.
+    A local Otsu threshold on the grey image around the word, read digits-only (plain and
+    inverted), recovers them.
+    """
+    import cv2
+    import re
+    from statistics import median
+
+    if not words:
+        return words
+    typical = median(w["bottom"] - w["top"] for w in words)
+    out = []
+    for w in words:
+        tall = (w["bottom"] - w["top"]) > 2.2 * typical
+        if tall and re.search(r"\d", w["text"]) and not re.fullmatch(r"\d{3}", w["text"]):
+            pad = int(0.3 * (w["bottom"] - w["top"]))
+            y0, y1 = max(0, int(w["top"]) - pad), int(w["bottom"]) + pad
+            x0, x1 = max(0, int(w["x0"]) - 3 * pad), int(w["x1"]) + 3 * pad
+            crop = gray[y0:y1, x0:x1]
+            if crop.size == 0:
+                out.append(w)
+                continue
+            _, b = cv2.threshold(crop, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            for variant in (b, 255 - b):
+                fresh = _tesseract_words(variant, "--psm 7 -c tessedit_char_whitelist=0123456789")
+                digits = "".join(f["text"] for f in fresh)
+                if re.fullmatch(r"\d{3}", digits):
+                    w = {**w, "text": digits}
+                    break
+        out.append(w)
     return out

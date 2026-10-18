@@ -66,7 +66,36 @@ def norm_dpd(tok: str) -> str | None:
     if re.fullmatch(r"[0-9O]{1,4}", t):
         t = t.replace("O", "0")
         t = "000" if set(t) == {"0"} else t.zfill(3)
+    elif re.fullmatch(r"[A-Z0-9]{2,3}", t) and not DPD_CODE.match(t):
+        # common OCR slips in the classification codes: STD read as 'STP' / 'SRP', XXX as 'XX'
+        fixed = t.translate(str.maketrans({"P": "D", "R": "T", "0": "D", "8": "B", "5": "S"}))
+        if fixed in CLASS_CODES:
+            t = fixed
+        elif set(t) == {"X"}:
+            t = "XXX"
+        else:
+            import difflib
+            m = difflib.get_close_matches(fixed, sorted(CLASS_CODES), n=1, cutoff=0.75)
+            t = m[0] if m else t
     return t if DPD_CODE.match(t) else None
+
+
+CLASS_CODES = {"STD", "SMA", "SUB", "DBT", "LSS", "XXX"}
+
+
+def sanity_check_dpd(dpd: dict[str, str]) -> tuple[dict[str, str], list[str]]:
+    """Days past due can rise by about 30 a month at most. A lone spike between clean months
+    (e.g. '900' between two '000') is an OCR slip: replace it and report it for user review."""
+    keys = sorted(dpd)
+    out, notes = dict(dpd), []
+    for k_prev, k, k_next in zip(keys, keys[1:], keys[2:] + [None]):
+        v, p = out[k], out[k_prev]
+        if v.isdigit() and p.isdigit() and int(v) > int(p) + 35:
+            n = out.get(k_next) if k_next else None
+            if n is None or (n.isdigit() and int(n) < int(v) - 35):
+                notes.append(f"payment history {k} read as {v}; treated as {p}, please verify")
+                out[k] = p
+    return out, notes
 
 
 def parse_kv(text: str) -> dict[str, str]:
@@ -184,17 +213,34 @@ def _parse_account(body: list[Line], i: int, pending: list[Line]) -> tuple[Accou
     fields: dict[str, str] = {}
     dpd: dict[str, str] = {}
     month_x: dict[str, float] = {}
+    grid_year: int | None = None
     i += 1
     while i < len(body):
         t = body[i].text
         if t.startswith("(MEMBER NAME)") or t.startswith("ENQUIRY INFORMATION"):
             break
-        if sum(is_month(w.text) for w in body[i].words) >= 9 and len(body[i].words) >= 12:
+        words = body[i].words
+        if sum(is_month(w.text) for w in words) >= 9 and len(words) >= 12:
             # header columns run DEC .. JAN; position is more reliable than OCR'd spelling,
             # and the 'MONTH / YEAR' corner cell is often unreadable, so take the last 12 tokens
-            month_x = {m: w.cx for m, w in zip(reversed(MONTHS), body[i].words[-12:])}
-        elif month_x and re.match(r"^(19|20)\d\d\b", t):
-            year = body[i].words[0].text
+            month_x = {m: w.cx for m, w in zip(reversed(MONTHS), words[-12:])}
+            grid_year = None
+        elif month_x and len(words) >= 2 and words[0].cx < min(month_x.values()) - 20 \
+                and any(norm_dpd(w.text) for w in words[1:]) and not parse_kv(t):
+            # a grid row: rows run newest first; repair an unreadable year from the row order,
+            # or from the payment end date for the first row
+            raw = words[0].text
+            if re.fullmatch(r"(19|20)\d\d", raw):
+                grid_year = int(raw)
+            elif grid_year:
+                grid_year -= 1
+            else:
+                end = to_date(fields.get("pay_end"))
+                grid_year = end.year if end else None
+            if grid_year is None:
+                i += 1
+                continue
+            year = str(grid_year)
             for w in body[i].words[1:]:
                 code = norm_dpd(w.text)
                 if code:
@@ -207,8 +253,15 @@ def _parse_account(body: list[Line], i: int, pending: list[Line]) -> tuple[Accou
         if done:
             break
 
+    # a year outside the account's payment-history window is an OCR slip ('2015' read as '2018')
+    start, end = to_date(fields.get("pay_start")), to_date(fields.get("pay_end"))
+    if start and end and dpd and any(not (start.year <= int(k[:4]) <= end.year) for k in dpd):
+        span = sorted({k[:4] for k in dpd}, reverse=True)
+        remap = {y: str(end.year - n) for n, y in enumerate(span)}
+        dpd = {remap[k[:4]] + k[4:]: v for k, v in dpd.items()}
+    dpd, notes = sanity_check_dpd(dict(sorted(dpd.items())))
     data: dict = {"member": member, "type": typ, "ownership": ownership,
-                  "account_last4": re.sub(r"\W", "", number)[-4:], "dpd": dict(sorted(dpd.items()))}
+                  "account_last4": re.sub(r"\W", "", number)[-4:], "dpd": dpd, "notes": notes}
     for k, v in fields.items():
         if k.startswith("_"):
             continue

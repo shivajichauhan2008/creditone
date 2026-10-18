@@ -25,6 +25,7 @@ def validate(r: ParsedReport) -> list[str]:
         bad = [c for c in a.dpd.values() if not DPD_CODE.match(c)]
         if bad:
             issues.append(f"Unreadable payment-history codes {bad[:3]}: {name}")
+        issues.extend(f"{name}: {n}" for n in a.notes)
         if a.is_open and a.credit_limit is None and a.sanctioned is None:
             issues.append(f"No limit or sanctioned amount: {name}")
     return issues

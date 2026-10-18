@@ -33,6 +33,7 @@ class Account(BaseModel):
     settlement: Optional[int] = None
     dpd: dict[str, str] = Field(default_factory=dict, description="'YYYY-MM' -> code")
     emi_confirmed: Optional[int] = Field(None, description="value the user confirmed on the review screen")
+    notes: list[str] = Field(default_factory=list, description="low-confidence reads for the user to verify")
 
     @property
     def is_open(self) -> bool:
