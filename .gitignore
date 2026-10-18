@@ -1,0 +1,21 @@
+# never commit real reports or secrets
+real_reports/
+*.env
+.env*
+!.env.example
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# node
+node_modules/
+.next/
+dist/
+
+# os / editors
+.DS_Store
+.vscode/
+.idea/

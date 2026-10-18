@@ -1,0 +1,27 @@
+services:
+  api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://creditone:creditone@db:5432/creditone
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+
+  # Postgres and Redis are wired in now for the next phases (accounts storage, parse job queue).
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: creditone
+      POSTGRES_PASSWORD: creditone
+      POSTGRES_DB: creditone
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+
+volumes:
+  pgdata:
