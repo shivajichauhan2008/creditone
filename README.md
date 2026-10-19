@@ -16,7 +16,7 @@ backend/            FastAPI API, report parser, OCR, rules engine, tests
   tests/            parser, rules and API tests against the synthetic fixtures
 fixtures/           synthetic test reports + ground-truth JSON (fictional data only)
 scripts/            synthetic report generator
-frontend/           Next.js web app (to be scaffolded, see frontend/README.md)
+frontend/           Next.js web app: upload -> review -> dashboard (see frontend/README.md)
 mobile/             React Native app (phase 4)
 docs/               product and development plan
 ```
@@ -28,9 +28,11 @@ cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 sudo apt install tesseract-ocr   # needed only for image-only reports (macOS: brew install tesseract)
-pytest -q                         # 11 tests: parser (text, protected, OCR), rules, API
+pytest -q                         # 15 tests: parser (text, protected, OCR), OCR slips, rules, API
 uvicorn app.main:app --reload     # http://localhost:8000/docs
 ```
+
+Then the web app: `cd frontend && npm install && npm run dev` (http://localhost:3000).
 
 Or with Docker: `docker compose up --build` (API on port 8000, plus Postgres and Redis for later phases).
 
@@ -76,7 +78,10 @@ with every expected field and insight. Regenerate with `python scripts/generate_
 - [x] Synthetic fixtures and ground truth
 - [x] Parser: text layer, password, OCR (matches ground truth exactly on the synthetic report)
 - [x] Rules engine and API
-- [ ] OCR tuning on real reports (score badge, grid header variants)
-- [ ] Next.js web app
+- [x] OCR tuning on a real CIBIL layout (score badge, unreadable grid headers, damaged years)
+- [x] Next.js web app: upload, review, dashboard (checked end to end at phone and desktop widths)
+- [x] CI: backend tests and frontend lint + build on every push
+- [ ] Login (phone OTP), storage in Postgres, background parse jobs
+- [ ] Hindi
 - [ ] Explanations layer (LLM, English and Hindi, from computed figures only)
 - [ ] Experian / CRIF / Equifax adapters, cross-bureau check

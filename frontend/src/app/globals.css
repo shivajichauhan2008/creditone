@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+/* CreditOne tokens: cool paper, deep ink, and one warm marigold for money going out.
+   Green is reserved for money left; brick red only for things that hurt the score. */
+:root {
+  --paper: #ffffff;
+  --panel: #f3f5f9;
+  --line: #dde2ec;
+  --ink: #1b2440;
+  --muted: #5b6478;
+  --marigold: #d98a06;
+  --indigo: #3a4a9e;
+  --slate: #8b94a8;
+  --mist: #c3cad8;
+  --leaf: #2c7a53;
+  --brick: #b4382a;
+  --sun: #fff4dd;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-panel: var(--panel);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-marigold: var(--marigold);
+  --color-indigo: var(--indigo);
+  --color-slate: var(--slate);
+  --color-mist: var(--mist);
+  --color-leaf: var(--leaf);
+  --color-brick: var(--brick);
+  --color-sun: var(--sun);
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "tnum" 1; /* aligned rupee columns */
+}
+
+:focus-visible {
+  outline: 3px solid var(--marigold);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
